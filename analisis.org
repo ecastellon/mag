@@ -1,0 +1,1322 @@
+# -*- mode: org; org-export-coding-system: utf-8; -*-
+#+setupfile: c:/eddy/wp/setup.org
+#+property: header-args :results silent
+
+* utiles
+#+name: inicio
+#+BEGIN_SRC R :var wd=""
+  library("tidyr")
+  library("RODBC")
+  source("c:/eddy/code/r/huaca.r",local=attach(NULL,nam="huaca"))
+  if(nzchar(wd)) setwd(wd)
+  message(":> directorio-trabajo... ",getwd())
+#+END_SRC
+#+name: librerias
+#+BEGIN_SRC R :var lib=""
+  try(sapply(strsplit(lib,split="[[:space:]]")[[1]],
+             require,character.only=T))
+#+END_SRC
+* ammi
+** frijol-caldron
+#+call: inicio("c:/almacen/datos/experimento/ammi/caldron")
+*** notas
+- matagalpa-postrera sin datos de vainas/planta, granos/vaina,
+  germinación
+- crucero-postrera sin datos de germinación, plantas cosechadas
+  aparentemente en una ha
+- cardenas-apante sin datos de germinación, plantas cosechadas
+- yali-primera: error obvio en los datos de germinación de la parcela
+  102
+- matagalpa-primera: misma observación que en yali-primera. Pareciera
+  que hay una gran variación en esta variable (mala especificación?)
+- ceca-postrera: mismo que anteriores
+- ceca-primera: datos de valor comercial sólo en la primera repetición
+- ÔjÔ: verificar mi interpretación de las variables germinación (Go)
+  y aceptabilidad (ADR)
+- madriz-primera: los datos de aceptabilidad, bajos c.r.a los demás
+  experimentos
+- algunos datos de hábito: 3a o 3b en lugar de 2a o 2b
+- ÔjÔ: errores en la transformación de los datos a 14%_humedad en
+  varias localidades: matagalpa-primera; yalí, telica corrección por
+  humedad ok, pero la de superficie no es consistente con parcela de
+  6_m2; crucero: ídem telica; cárdenas no hay datos de parcela para
+  verificar
+- en jalapa aparentemente un tamaño de parcela menor (5m2) en lugar
+  de los 6 utilizados en la mayoría
+- matagalpa-primera parcela 102 es un outlier obvio
+*** datos
+:PROPERTIES:
+:ORDERED:  t
+:END:
+#+BEGIN_SRC R
+  kk <- odbcConnectExcel2007("frijolbioforte2015.xlsx")
+  uu <- lapply(dbTablas(kk),function(x){
+      ww <- sqlFetch(x,channel=kk,nullstring=0,stringsAsFactor=F)
+      ww["ambiente"] <- x
+      ww["bloque"] <- ww$rep_par%/%100
+      invisible(ww)
+  })
+  odbcClose(kk)
+  dd <- Reduce(rbind,uu,init=NULL)
+  rm(uu)
+  names(dd) <- tolower(names(dd))
+  cc <- gsub("[[:space:]]+$","",dd$genotipo)
+  cc <- sub(".+oso$","Ferroso",cc)
+  dd["genotipo"] <- sub("[[:space:]]+","_",cc)
+  cc <- tolower(dd$habito)
+  cc <- gsub("[[:space:]]+$","",cc)
+  cc <- sub("iia","2a",cc)
+  cc <- sub("iib","2b",cc)
+  cc <- sub("3a","2a",cc)
+  dd["habito"] <- sub("3b","2b",cc)
+#+END_SRC
+
+#+BEGIN_SRC R
+  attr(dd,"meta") <- "frijol biofortificado-tesis-ronaldo"
+  save(dd,file="frijolcaldron.rda")
+#+END_SRC
+
+#+BEGIN_SRC R
+  kk <- odbcConnectExcel2007("frijolbioforte2015b.xlsx")
+  df <- sqlQuery(kk,"select * from datos")
+  odbcClose(kk)
+  names(df) <- tolower(names(df))
+  ff <- function(x){
+      cc <- levels(x)[x]
+      cc <- gsub("[[:space:]]+$","",cc)
+      cc <- gsub("^[[:space:]]+","",cc)
+      cc <- gsub("[[:space:]]+"," ",cc)
+      factor(cc)
+  }
+  df["ambiente"] <- ff(df$departamento)
+  df["genotipo"] <- ff(df$genotipo)
+  attr(df,"meta") <- "datos-kg/ha-enviados-Aurelio-20160408"
+  guardar(df, "dk", file="frijolcaldron.rda")
+  rm(df)
+#+END_SRC
+
+#+BEGIN_SRC R
+  kk <- odbcConnectExcel2007("frijolbiofortehierrozinc.xlsx")
+  fe <- sqlQuery(kk,"select * from hierro")
+  zn <- sqlQuery(kk,"select * from zinc")
+  odbcClose(kk)
+
+  meta(fe) <- "frijol-biofortificado-Fe-semilla, tesis Caldrón-2015"
+  meta(zn) <- "frijol-biofortificado-Zn-semilla, tesis Caldrón-2015"
+  ww <- lapply(list(fe, zn),
+               function(x){
+                   zz <- gather(x, key="ambiente", value="ppm",
+                                names(x)[-1])
+                   cc <- levels(zz$genotipo)[zz$genotipo]
+                   cc <- tolower(gsub("\\W+", "", cc))
+                   zz["genotipo"] <- factor(cc)
+                   meta(zz) <- meta(x)
+                   zz
+               })
+
+  guardar(ww[[1]], "fe", file="frijolcaldron.rda")
+  guardar(ww[[2]], "zn", file="frijolcaldron.rda")
+#+END_SRC
+*** análisis
+src_R{attach("frijolcaldron.rda",name="fri")}
+src_R{librerias(c("dplyr hash"))}
+src_R{librerias(c("gmodels xtable stringr"))}
+**** datos-originales
+#+BEGIN_SRC R
+  library(dplyr)
+  library(hash)
+  dd["bloque"] <- factor(dd$bloque)
+  dd["variedad"] <- factor(dd$genotipo,labels=letters[1:16])
+  dd["localidad"] <- factor(dd$ambiente,labels=LETTERS[1:11])
+  cc <- unique(dd$genotipo)
+  hg <- hash(letters[1:16],cc[order(cc)])
+  cc <- unique(dd$ambiente)
+  ha <- hash(LETTERS[1:11],cc[order(cc)])
+#+END_SRC
+
+#+BEGIN_SRC R :results output replace wrap
+  rr <- replications(kg_ha~genotipo*(ambiente/bloque),dd,
+                     na.action=na.pass)
+  if(!is.list(rr)) rr else message("no balanceado")
+#+END_SRC
+
+#+RESULTS:
+:RESULTS:
+
+               genotipo                 ambiente          ambiente:bloque
+                      33                       48                       16
+       genotipo:ambiente genotipo:ambiente:bloque
+                       3                        1
+:END:
+
+#+BEGIN_SRC R
+  uu <- aov(kg_ha~genotipo*(ambiente/bloque),data=dd,
+            na.action=na.pass)
+#+END_SRC
+
+#+BEGIN_SRC R
+  mr <- group_by(dd,ambiente,genotipo)%>%
+      summarise(kg_ha=round(mean(kg_ha),3))
+#+END_SRC
+
+#+BEGIN_SRC R
+  mr <- group_by(dd,localidad,variedad)%>%
+      summarise(kg_ha=round(mean(kg_ha),3))
+  plot(kg_ha~variedad,data=mr,horizontal=T)
+  plot(kg_ha~localidad,data=mr)
+#+END_SRC
+
+#+BEGIN_SRC R
+  library("lattice")
+  dotplot(kg_ha~variedad|localidad,data=mr)
+  parallelplot(~mr[,c(3,2)]|localidad,data=mr)
+#+END_SRC
+
+#+BEGIN_SRC R
+  library("rggobi")
+  mr <- group_by(dd,localidad,variedad)%>%
+      summarise(kg_ha=round(mean(kg_ha),3))
+  uu <- group_by(mr,variedad)%>%spread(localidad,kg_ha)
+  gg <- ggobi(uu)
+#+END_SRC
+
+#+BEGIN_SRC R
+  library("ggplot2")
+  gg <- ggplot(data=dd,aes(x=reorder(variedad,kg_ha,FUN="median"),
+                   y=kg_ha))
+  gg+geom_boxplot()+labs(x="variedad",y="kg_ha",
+                         title="dispersion x variedad")
+  gg <- ggplot(data=dd,aes(x=reorder(localidad,kg_ha,FUN="median"),
+                   y=kg_ha))
+  gg+geom_boxplot()+labs(x="localidad",y="kg_ha",
+                         title="dispersion por localidad")
+#+END_SRC
+
+**** contenido de hierro y zinc
+#+call: ammi-funciones()
+#+BEGIN_SRC R
+  librerias("ggplot2 ggrepel")
+  leer_df(c("fe", "zn"), "frijolcaldron.rda")
+  fe["ambiente"] <- factor(fe$ambiente)
+  zn["ambiente"] <- factor(zn$ambiente)
+
+  nmg <- c(cinc="cincuenteño", ifer="intaferroso", s100="smr100",
+           s104="smr104", s105="smr105", s106="smr106", s108="smr108",
+           s115="smr115", s124="smr124", s128="smr128", s130="smr130",
+           s085="smr85", s088="smr88", s091="smr91", s092="smr92",
+           s096="smr96")
+  nma <- c(cz1="carazo_pri", ji2="jinotega_pos", ji1="jinotega_pri",
+           le2="leon_pos", mz1="madriz_pri", mg2="managua_pos",
+           my2="masaya_pos", mt2="matagalpa_pos", mt1="matagalpa_pri",
+           ns2="nva_segovia_pos", ri2="rivas_pos")
+
+  zav <- aov(ppm~genotipo*ambiente, data=zn)
+  tt <- model.tables(zav, type="effects", cterms="genotipo:ambiente")
+
+  zsv <- ge_svd(tt$tables[["genotipo:ambiente"]], ncp=4)
+  sci <- summary(zav)[[1]]$"Sum Sq"[3]
+  scv <- zsv$vs * zsv$vs
+  scr <- sci - sum(scv)
+
+  mg <- tapply(zn$ppm, zn$genotipo, mean)
+  ma <- tapply(zn$ppm, zn$ambiente, mean)
+
+  zsv <- ge_svd(tt$tables[["genotipo:ambiente"]], ncp=2)
+  pb <- ge_biplot_mean(mg, ma, zsv$u, zsv$v, names(nmg),
+                       names(nma), labsize=3, pointsize=1)
+  ggsave("ammi_1zn.pdf", pb+theme_gray(base_size=10),
+         width=5, height=4.8)
+
+  pb <- ge_biplot(zsv$u, zsv$v, names(nmg), names(nma), labsize=3,
+                  pointsize=1)
+  ggsave("ammi_2zn.pdf", pb+theme_gray(base_size=10),
+         width=5, height=4.8)
+#+END_SRC
+
+#+BEGIN_SRC R
+  cc <- append(nma, "raccs_pos", after=10)
+  names(cc)[11] <- "rc2"
+
+  fav <- aov(ppm~genotipo*ambiente, data=fe)
+  tt <- model.tables(fav, type="effects", cterms="genotipo:ambiente")
+  fsv <- ge_svd(tt$tables[["genotipo:ambiente"]], ncp=4)
+
+  sci <- summary(fav)[[1]]$"Sum Sq"[3]
+  scv <- fsv$vs * fsv$vs
+  scr <- sci - sum(scv)
+
+  mg <- tapply(fe$ppm, fe$genotipo, mean)
+  ma <- tapply(fe$ppm, fe$ambiente, mean)
+  fsv <- ge_svd(tt$tables[["genotipo:ambiente"]], ncp=2)
+
+  pb <- ge_biplot_mean(mg, ma, fsv$u, fsv$v, names(nmg),
+                       names(cc), labsize=3, pointsize=1)
+  ggsave("ammi_1fe.pdf", pb+theme_gray(base_size=10),
+         width=5, height=4.8)
+
+  pb <- ge_biplot(fsv$u,fsv$v, names(nmg), names(cc), labsize=3,
+                  pointsize=1)
+  ggsave("ammi_2fe.pdf", pb+theme_gray(base_size=10),
+         width=5, height=4.8)
+#+END_SRC
+**** datos-rendimiento-Aurelio
+#+name: prepara-datos-aurelio
+#+BEGIN_SRC R
+  ng <- seq_len(nlevels(dk$genotipo))
+  nl <- seq_len(nlevels(dk$departamento))
+  dk["bloque"] <- factor(dk$repeticion)
+  dk["variedad"] <- factor(dk$genotipo,labels=letters[ng])
+  dk["localidad"] <- factor(dk$departamento,labels=LETTERS[nl])
+  cc <- levels(dk$genotipo)
+  hg <- hash(letters[ng],cc[order(cc)])
+  cc <- levels(dk$departamento)
+  ha <- hash(LETTERS[nl],cc[order(cc)])
+#+END_SRC
+#+BEGIN_SRC R :results output replace wrap
+  rr <- replications(kg_ha~genotipo*(departamento/bloque),dk,
+                     na.action=na.pass)
+  if(!is.list(rr)) rr else message("no balanceado")
+#+END_SRC
+
+#+RESULTS:
+:RESULTS:
+
+                   genotipo                 departamento
+                          33                           48
+         departamento:bloque        genotipo:departamento
+                          16                            3
+genotipo:departamento:bloque
+                           1
+:END:
+***** exploratorio
+#+BEGIN_SRC R
+  lab <- paste(paste(levels(dk$variedad),
+                     values(hg,levels(dk$variedad)),sep="-"),
+               collapse="\n")
+  gg <- ggplot(data=dk,aes(x=reorder(variedad,kg_ha,FUN="median"),
+                   y=kg_ha))
+  gg <- gg+geom_boxplot()+labs(x="variedad",y="kg_ha",
+                               title="dispersion x variedad")
+  lb <- paste(paste(levels(dk$localidad),
+                     values(ha,levels(dk$localidad)),sep="-"),
+               collapse="\n")
+  gp <- ggplot(data=dk,aes(x=reorder(localidad,kg_ha,FUN="median"),
+                   y=kg_ha))
+  gp <- gp+geom_boxplot()+labs(x="localidad",y="kg_ha",
+                         title="dispersion por localidad")
+#+END_SRC
+#+BEGIN_SRC R
+  ggsave("dis_var.pdf",gg+annotate("text",label=lab,
+                                   x=6.5,y=2700,size=2),
+         width=5,height=5)
+  ggsave("dis_loc.pdf",gp+annotate("text",label=lb,
+                                   x=1.5,y=2700,size=2),
+         width=5,height=5)
+#+END_SRC
+#+BEGIN_SRC R
+  ww <- group_by(dk,variedad,localidad)%>%summarise(kg_ha=mean(kg_ha))
+  zz <- spread(ww,localidad,kg_ha)
+
+#+END_SRC
+***** aov experimentos
+#+BEGIN_SRC R
+  mc <- t(contr.poly(14))
+  mc <- cbind(matrix(0,ncol=2,nrow=nrow(mc)),mc)
+  mc <- rbind("test_vs_SMR"=c(0.5,0.5,rep(-1/14,14)),mc)
+  mc <- rbind("cinc_vs_ferr"=c(1,-1,rep(0,14)),mc)
+  ff <- function(x){
+      av <- aov(kg_ha~bloque+variedad,
+                contrasts=list(variedad=make.contrasts(mc)),
+                data=x)
+      loc <- ha[[(levels(x$localidad)[x$localidad])[1]]]
+      fc <- fit.contrast(av,"variedad",mc[1:2,],conf=0.95)
+      con <- data.frame(fc[,c(1,2,5,6)])
+      names(con) <- c("estimado","desv_est",
+                         "lim_inf_95","lim_sup_95")
+      rownames(con) <- c(paste(loc,"cinc_vs_ferr",sep="_"),
+                         paste(loc,"test_vs_SMR",sep="_"))
+      cme <- deviance(av)/df.residual(av)
+      med <- mean(x$kg_ha)
+      cv <- signif(sqrt(cme)/med,2)
+      mev <- tapply(x$kg_ha,x$variedad,mean)
+      res <- data.frame(kg_ha=signif(c(mev,med,
+                            sqrt(cme/nlevels(x$bloque)),
+                            cv),2))
+      rownames(res) <- c(values(hg,keys=names(mev)),
+                         "media","des_est_media","coef_var")
+      names(res) <- loc
+      list(av=summary(av,split=list(variedad=list("cinc_vs_ferr"=1,
+                                        "test_vs_SMR"=2))),
+           cme=signif(cme,3),
+           media=signif(med,2),
+           res=res,
+           con=signif(con,3),
+           loc=loc)
+  }
+  ww <- lapply(split(dk,dk$localidad),ff)
+#+END_SRC
+#+BEGIN_SRC R
+  fi <- "r_tesis.tex"
+  if(file.exists(fi)) unlink(fi)
+  hh <- function(x){
+      print(xtable(x$av,caption=x$loc,digits=3),file=fi,append=T,
+            booktabs=T,comment=F,caption.placement="top")
+      invisible(x[["res"]])
+  }
+  zz <- lapply(ww,hh)
+  zz <- Reduce(cbind,zz)
+  print(xtable(zz,caption="promedios-localidad"),file=fi,append=T,
+        booktabs=T,comment=F,caption.placement="top")
+  xx <- Reduce(rbind,lapply(ww,"[[","con"))
+  print(xtable(xx,caption="contrastes-localidad"),file=fi,append=T,
+        booktabs=T,comment=F,caption.placement="top")
+#+END_SRC
+#+BEGIN_SRC R
+  guardaxls(zz,"promedios","r_tesis",xlsx=F,nomfilas=T)
+  guardaxls(xx,"contrastes","r_tesis",xlsx=F,nomfilas=T)
+#+END_SRC
+#+BEGIN_SRC R
+  mc <- t(contr.poly(14))
+  mc <- cbind(matrix(0,ncol=2,nrow=nrow(mc)),mc)
+  mc <- rbind("test_vs_SMR"=c(0.5,0.5,rep(-1/14,14)),mc)
+  mc <- rbind("cinc_vs_ferr"=c(1,-1,rep(0,14)),mc)
+  av <- aov(kg_ha~variedad*localidad+Error(localidad/bloque),data=dk,
+            contrasts=list(variedad=make.contrasts(mc)))
+  ww <- summary(av,split=list(variedad=list("cinc_vs_ferr"=1,
+                                            "test_vs_SMR"=2)))
+  hh <- function(zz,xx){
+      zz <- cbind(zz,"Mean Sq"=zz[["Sum Sq"]]/zz[["Df"]])
+      zz <- cbind(zz,"F value"=zz[["Mean Sq"]]/xx[["Mean Sq"]])
+      zz <- cbind(zz,"Pr(>F)"=pf(zz[["F value"]],
+                                 zz[["Df"]],xx[["Df"]],
+                                 lower.tail=F))
+      invisible(zz)
+  }
+  xx <- ww[["Error: localidad"]][[1]]
+  zz <- ww[["Error: localidad:bloque"]][[1]]
+  xx <- hh(xx[,c("Df","Sum Sq")],zz)
+  uu <- rbind(xx,zz)
+  rownames(uu) <- c("localidad","localidad:bloque")
+  xx <- ww[["Error: Within"]][[1]]
+  cw <- nchar(row.names(xx)[1])
+  row.names(xx) <- str_trim(row.names(xx))
+  cn <- c("cinc_vs_ferr","test_vs_SMR")
+  ss <- paste("variedad:",cn)
+  cc <- c("Df","Sum Sq")
+  zz <- xx["variedad",cc]-colSums(xx[ss,cc])
+  zz <- hh(zz,xx["Residuals",])
+  zz <- rbind(xx[c("variedad",ss),],zz)
+  ss <- c(ss,"variedad: entre SMR")
+  rownames(zz) <- c("variedad",str_pad(ss,sapply(ss,nchar)+2))
+  uu <- rbind(uu,zz)
+  ss <- paste("variedad:localidad:",cn)
+  zz <- xx["variedad:localidad",cc]-colSums(xx[ss,cc])
+  zz <- hh(zz,xx["Residuals",])
+  zz <- rbind(xx[c("variedad:localidad",ss),],zz)
+  ss <- c(ss,"variedad:localidad: entre SMR")
+  rownames(zz) <- c("variedad:localidad",
+                    str_pad(ss,sapply(ss,nchar)+2))
+  uu <- rbind(uu,zz,xx["Residuals",])
+  rownames(uu) <- str_pad(rownames(uu),cw,"right")
+#+END_SRC
+#+BEGIN_SRC R
+  print(xtable(xx,caption="análisis-combinado"),file=fi,append=T,
+        booktabs=T,comment=F,caption.placement="top")
+#+END_SRC
+#+BEGIN_SRC R
+  av <- aov(kg_ha~genotipo*localidad+bloque:localidad,data=dk,
+            na.action=na.pass)
+  tt <- model.tables(av,type="effects",cterms="genotipo:localidad")
+  ti <- tt$tables[["genotipo:localidad"]]
+#+END_SRC
+#+BEGIN_SRC R
+  library("lme4")
+  av <- lmer(kg_ha~genotipo*localidad+(1|bloque:localidad),data=dk)
+#+END_SRC
+***** ammi
+****** codigo
+#+name: ammi-funciones
+#+BEGIN_SRC R
+  ge_signal <- function(sci, sce){
+      nn <- sce["cm"]*sci["gl"]
+      c(signal=sci["sc"]-nn,noise=nn,
+                  pct=round(100*(1.0-nn/sci["sc"]),2))
+  }
+  ge_contribucion <- function(vs, sci, nob){
+      scc <- vs*vs*nob["repeticiones"]
+      list(individual=round(100*scc/sci["sc"]),
+           acumulada=round(100*cumsum(scc)/sci["sc"]))
+  }
+  ge_svd <- function(t2w, ncp=2, lam=0.5){
+      vs <- svd(t2w, ncp, ncp)
+      dv <- vs$d[1:ncp]
+      uu <- vs$u%*%diag(dv^lam)
+      vv <- vs$v%*%diag(dv^(1-lam))
+      ss <- paste0("cp",seq_len(ncp))
+      names(dv) <- ss
+      dimnames(uu) <- list(dimnames(t2w)[[1]],ss)
+      dimnames(vv) <- list(dimnames(t2w)[[2]],ss)
+      invisible(list(vs=dv, u=uu, v=vv))
+  }
+  ge_gollob <- function(vs, sci, sce, nob){
+      scc <- vs*vs*nob["repeticiones"]
+      glc <- nob["genotipos"]+nob["ambientes"]-1-2*seq_along(vs)
+      cmc <- scc/glc
+      fcc <- cmc/sce["cm"]
+      pfc <- pf(fcc,glc,sce["gl"],lower.tail=F)
+      scr <- sci["sc"]-sum(scc)
+      glr <- sci["gl"]-sum(glc)
+      cmr <- scr/glr
+      fcr <- cmr/sce["cm"]
+      pfr <- pf(fcr,glr,sce["gl"],lower.tail=F)
+      ami <- data.frame(Df=c(glc,glr),"Sum Sq"=c(scc,scr),
+                        "Mean Sq"=c(cmc,cmr),
+                        "F value"=c(fcc,fcr),
+                        "Pr(>F)"=round(c(pfc,pfr),4))
+      rownames(ami) <- c(paste0("cp_",seq_along(vs)),"residuo_int")
+      invisible(ami)
+  }
+  ge_FR <- function(vs,sci,sce,nob){
+      scc <- sci["sc"]-nob["repeticiones"]*cumsum(vs^2)
+      nn <- seq_along(vs)+1
+      glc <- (nob["genotipos"]-nn)*(nob["ambientes"]-nn)
+      cmc <- scc/glc
+      fcc <- cmc/sce["cm"]
+      pfc <- pf(fcc,glc,sce["gl"],lower.tail=F)
+      ami <- data.frame(Df=glc,"Sum Sq"=scc,
+                        "Mean Sq"=cmc,
+                        "F value"=fcc,
+                        "Pr(>F)"=round(pfc,4))
+      rownames(ami) <- paste0("cp_",seq_along(vs))
+      invisible(ami)
+  }
+  ge_biplot_mean <- function(mgen,mamb,sgen,samb,labgen,labamb,
+                             labsize=4,pointsize=4,
+                             tip_txt="txt"){
+      require("ggplot2")
+      xx <- data.frame(med=c(mgen,mamb),
+                       cp1=c(sgen[,"cp1"],samb[,"cp1"]),
+                       lab=c(labgen,labamb),
+                       tip=unlist(Map(rep,
+                           c("genotipo","ambiente"),
+                           each=c(nrow(sgen),nrow(samb)))))
+      pp <- ggplot(data=xx,aes(x=med,y=cp1))
+      pp <- pp+geom_vline(xintercept=mean(xx$med),linetype=11,
+                          colour="gray70",size=0.2)
+      pp <- pp+geom_hline(yintercept=0,linetype=11,colour="gray70",
+                          size=0.2)
+      pp <- pp+geom_point(shape=21,size=pointsize)
+      if(tip_txt=="txt"){
+          pp <- pp+geom_text_repel(aes(label=lab,
+                                       colour=factor(tip)),
+                                   size=labsize,show.legend=F)
+      } else{
+            pp <- pp+geom_label_repel(aes(label=lab,
+                                          colour=factor(tip)),
+                                      size=labsize,show.legend=F)
+      }
+      pp+labs(x="promedio",y="primer componente")
+  }
+  ge_biplot <- function(sgen,samb,labgen,labamb,labsize=3,
+                        pointsize=1,tip_txt="txt"){
+      require(ggplot2)
+      xx <- as.data.frame(rbind(sgen,samb))
+      xx["tip"] <- c(rep("genotipo",nrow(sgen)),
+                     rep("ambiente",nrow(samb)))
+      pp <- ggplot(data=xx,aes(x=cp1,y=cp2))
+      pp <- pp+geom_vline(xintercept=0,linetype=11,
+                          colour="gray70",size=0.2)+
+          geom_hline(yintercept=0,linetype=11,
+                     colour="gray70",size=0.2)
+      if(FALSE){
+          pp <- pp+geom_point(data=filter(xx,tip=="genotipo"),
+                              aes(x=cp1,y=cp2,colour="red"),
+                              shape=21,size=pointsize)+
+              geom_point(data=filter(xx,tip=="ambiente"),
+                         aes(x=cp1,y=cp2,colour="blue"),
+                         shape=22,size=pointsize)
+      }
+      pp <- pp+geom_point(shape=1,size=pointsize)
+      pp <- pp+geom_segment(data=filter(xx,tip=="ambiente"),
+                            aes(x=0,y=0,xend=cp1,yend=cp2),
+                            size=pointsize*0.1,
+                            arrow=arrow(length=unit(0.2,"cm")),
+                            show.legend=F)
+      if(tip_txt=="txt"){
+          pp <- pp+geom_text_repel(aes(label=c(labgen,labamb),
+                                       colour=factor(tip)),
+                                   size=labsize,show.legend=F)
+      } else{
+          pp <- pp+geom_label_repel(data=filter(xx,tip=="ambiente"),
+                                   aes(x=cp1,y=cp2,label=labamb,
+                                       colour="red"),size=labsize)+
+              geom_text_repel(data=filter(xx,tip=="genotipo"),
+                              aes(x=cp1,y=cp2,label=labgen,
+                                  colour="blue"),size=labsize)
+      }
+      pp+labs(x="primer componente",y="segundo componente")
+  }
+#+END_SRC
+#+BEGIN_SRC R
+  plot(1,type="n",xlim=range(c(ea[,1],eg[,1])),
+       ylim=range(c(ea[,2],eg[,2])),xlab="cp1",ylab="cp2")
+  points(ea[,1],ea[,2],"n",col="red",lwd=5)
+  text(ea[,1],ea[,2],labels=row.names(ea),adj=c(0.5,0.5),col="red")
+  points(eg[,1],eg[,2],"n",col="blue",lwd=5)
+  text(eg[,1],eg[,2],labels=row.names(eg),adj=c(0.5,0.5),col="blue")
+#+END_SRC
+****** gráficas-análisis
+#+call: prepara-datos-aurelio()
+#+BEGIN_SRC R
+  av <- aov(kg_ha~variedad*localidad+Error(localidad/bloque),
+            data=dk)
+  tt <- model.tables(av,type="effects",cterms="variedad:localidad")
+  usv <- ge_svd(tt$tables[["variedad:localidad"]],ncp=2)
+  nn <- c(repeticiones=nlevels(dk$bloque),
+          genotipos=nlevels(dk$variedad),
+          ambientes=nlevels(dk$localidad))
+  ww <- summary(av)[["Error: Within"]][[1]]
+  rownames(ww) <- str_trim(rownames(ww))
+  ss <- c("Df","Sum Sq","Mean Sq")
+  cc <- c("gl","sc","cm")
+  ssi <- as.numeric(ww["variedad:localidad",ss])
+  names(ssi) <- cc
+  ssr <- as.numeric(ww["Residuals",ss])
+  names(ssr) <- cc
+  sig <- ge_signal(sci=ssi,sce=ssr)
+  usv <- ge_svd(tt$tables[["variedad:localidad"]],ncp=4)
+  gol <- ge_gollob(usv$vs,ssi,ssr,nn)
+  names(gol) <- names(ww)
+  cc <- rownames(ww)
+  rownames(gol) <- str_pad(paste0("  ",rownames(gol)),
+                           nchar(cc[1]),"right")
+  frt <- ge_FR(usv$vs,ssi,ssr,nn)
+  names(frt) <- names(ww)
+  rownames(frt) <- str_pad(paste0("  ",rownames(frt)),
+                           nchar(cc[1]),"right")
+  wgo <- rbind(ww[1:2,],gol,ww[3,])
+  wfr <- rbind(ww[1:2,],frt,ww[3,])
+#+END_SRC
+#+BEGIN_SRC R
+  fi <- "r_tesis.tex"
+  print(xtable(wgo,caption="ammi-test-Gollob"),file=fi,append=T,
+        booktabs=T,comment=F,caption.placement="top")
+  print(xtable(wfr,caption="ammi-test-Goodman-Haberman"),file=fi,
+        append=T,booktabs=T,comment=F,caption.placement="top")
+#+END_SRC
+#+BEGIN_SRC R
+  ww <- as.data.frame(usv$u)
+  rownames(ww) <- values(hg,rownames(ww))
+  guardaxls(ww,"compgenotipos","r_tesis",xlsx=F,nomfilas=T)
+  ww <- as.data.frame(usv$v)
+  rownames(ww) <- values(ha,rownames(ww))
+  guardaxls(ww,"compambientes","r_tesis",xlsx=F,nomfilas=T)
+  guardaxls(as.data.frame(usv$vs),"valorsingular","r_tesis",
+            xlsx=F,nomfilas=F)
+#+END_SRC
+src_R{librerias("ggplot2 ggrepel")}
+#+BEGIN_SRC R
+  mg <- tapply(dk$kg_ha,dk$variedad,mean)
+  ma <- tapply(dk$kg_ha,dk$localidad,mean)
+  pb <- ge_biplot_mean(mg,ma,usv$u,usv$v,values(hg,names(mg)),
+                       values(ha,names(ma)),labsize=3,pointsize=1)
+#+END_SRC
+#+BEGIN_SRC R
+  ggsave("ammi_1.pdf",pb+theme_gray(base_size=10),
+         width=5,height=4.8)
+#+END_SRC
+#+BEGIN_SRC R
+  uu <- tolower(values(hg,rownames(usv$u)))
+  uu <- sub("s...","s_",uu)
+  uu <- sub("^c.+","cinc",uu)
+  sg <- sub("^i.+","ferr",uu)
+  uu <- tolower(values(ha,rownames(usv$v)))
+  uu <- sub("las.","",uu)
+  uu <- sub("[[:space:]]","_",uu)
+  uu <- sub("^mat.+_","mat_",uu)
+  uu <- sub("^jin.+_","jin_",uu)
+  uu <- sub("^mas.+_","mas_",uu)
+  uu <- sub("^mag.+_","mag_",uu)
+  uu <- sub("^mad.+_","mad_",uu)
+  uu <- sub("^man.+_","man_",uu)
+  uu <- sub("^seg.+_","seg_",uu)
+  uu <- sub("^l.+_","leo_",uu)
+  sa <- sub("^c.+","car",uu)
+  pb <- ge_biplot(usv$u,usv$v,sg,sa,labsize=3,pointsize=1)
+#+END_SRC
+#+BEGIN_SRC R
+  ggsave("ammi_2.pdf",pb+theme_gray(base_size=10),
+         width=5,height=4.8)
+#+END_SRC
+****** librerias
+#+BEGIN_SRC R
+  library(gge)
+  ww <- gge(kg_ha~bloque+variedad*localidad,data=dk,scale=F)
+#+END_SRC
+** maiz-brenes
+#+call: inicio("c:/almacen/datos/experimento/ammi/brenes")
+#+call: inicio("c:/eddy/wk/ammi/brenes")
+src_R{ADA <- "maizbrenes.rda"}
+*** notas
+#+name: meta
+| localidad       | epoca | siembra | cosecha | entre | largo | surcos |
+|-----------------+-------+---------+---------+-------+-------+--------|
+| Matagalpa       | postr |  201508 |  201512 |  0.80 |     5 |      3 |
+| Villa_Sandino   | postr |  201509 |  201601 |    NA |     5 |     NA |
+| Masatepe_riego  | apant |  201612 |  201604 |  0.80 |     5 |      1 |
+| Masatepe        | prime |  201507 |  201511 |  0.80 |     5 |      1 |
+| CNIA            | postr |  201508 |  201511 |  0.80 |     5 |      3 |
+| CNIA_riego      | apant |  201602 |  201605 |  0.80 |     5 |      3 |
+| Rivas_riego     | apant |  201612 |  201603 |  0.75 |     5 |      3 |
+| Rivas           | postr |  201507 |  201510 |  0.75 |     5 |      1 |
+| Posoltega_riego | NA    |      NA |      NA |  0.80 |     5 |      3 |
+| Posoltega       | postr |  201509 |  201601 |  0.80 |     5 |      4 |
+
+*** datos
+#+BEGIN_SRC R
+  fi <- list.files(pattern="xlsx?$")
+  dd <- lapply(fi,function(x){
+      tryCatch({
+          kk <- odbcConnectExcel2007(x)
+          lo <- sqlFetch(kk,"loca",stringsAsFactors=F)
+          ww <- sqlFetch(kk,"datos",stringsAsFactors=F)},
+          error=function(e)message(x),
+          finally=odbcClose(kk))
+      names(ww) <- tolower(names(ww))
+      mm <- match(names(ww),c("entry","genealogia"))
+      ii <- !is.na(mm)
+      names(ww)[ii] <- c("cod_var","genotipo")[mm[ii]]
+      ww[grep(".+NB-6$",ww$genotipo),"genotipo"] <- "NB-6"
+      cc <- names(ww)[grep("^[^x]",names(ww))]
+      cbind(data.frame(localidad=rep(lo$loca,nrow(ww)),
+                       stringsAsFactors=F),ww[,cc])
+  })
+  cc <- sapply(dd,function(x)x$localidad[1])
+  names(dd) <- cc
+#+END_SRC
+#+BEGIN_SRC R
+  attr(dd,"meta") <- "maiz-10-localidad-gonzalo-brenes"
+  save(dd,file=ADA)
+#+END_SRC
+#+BEGIN_SRC R
+  fi <- list.files(pattern="xlsx?$")
+  xx <- lapply(fi,function(x){
+      tryCatch({
+          kk <- odbcConnectExcel2007(x)
+          lo <- sqlFetch(kk,"loca",stringsAsFactors=F)
+          ww <- sqlFetch(kk,"datosb",stringsAsFactors=F)},
+          error=function(e)message(x),
+          finally=odbcClose(kk))
+      names(ww) <- tolower(names(ww))
+      mm <- match(names(ww),c("entry","genealogia"))
+      ii <- !is.na(mm)
+      names(ww)[ii] <- c("cod_var","genotipo")[mm[ii]]
+      ww[grep(".+NB-6$",ww$genotipo),"genotipo"] <- "NB-6"
+      cc <- names(ww)[grep("^[^x]",names(ww))]
+      cbind(data.frame(localidad=rep(lo$loca,nrow(ww)),
+                       stringsAsFactors=F),ww[,cc])
+  })
+  cc <- sapply(xx,function(x)x$localidad[1])
+  names(xx) <- cc
+  cc <- names(xx[[1]])
+  xx <- lapply(xx,function(x)x[,cc])
+  yy <- Reduce(rbind,xx)
+#+END_SRC
+#+BEGIN_SRC R
+  ng <- seq_along(unique(yy$genotipo))
+  nl <- seq_along(unique(yy$localidad))
+  yy["bloque"] <- factor(yy$rep)
+  yy["variedad"] <- factor(yy$genotipo,labels=letters[ng])
+  yy["ambiente"] <- factor(yy$localidad,labels=LETTERS[nl])
+  cc <- unique(yy$genotipo)
+  cc <- cc[order(cc)]
+  mm <- match(cc,yy$genotipo)
+  hg <- hash(letters[ng],cc)
+  hc <- hash(letters[ng],(yy$cod_var[mm])[seq_along(cc)])
+  cc <- unique(yy$localidad)
+  ha <- hash(LETTERS[nl],cc[order(cc)])
+#+END_SRC
+#+BEGIN_SRC R
+  attr(yy,"meta") <- "maiz-10-localidad-gonzalo-brenes;transformados"
+  attach(ADA,name="data")
+  dd <- dd
+  detach("data")
+  save(dd,yy,ha,hg,hc,file=ADA)
+  rm(dd,xx,yy,ha,hg,hc)
+#+END_SRC
+*** análisis
+src_R{attach("maizbrenes.rda",name="data")}
+src_R{file_res <- "brenes"}
+src_R{librerias(c("dplyr hash"))}
+src_R{librerias(c("gmodels xtable stringr"))}
+#+BEGIN_SRC R :results table replace wrap :rownames yes
+  rr <- replications(kgha~variedad*(ambiente/bloque),yy,
+                     na.action=na.pass)
+  if(!is.list(rr)) rr else message("no balanceado")
+#+END_SRC
+
+#+RESULTS:
+:RESULTS:
+| variedad                 | 20 |
+| ambiente                 | 16 |
+| ambiente:bloque          |  8 |
+| variedad:ambiente        |  2 |
+| variedad:ambiente:bloque |  1 |
+:END:
+**** exploratorio
+src_R{library(ggplot2)}
+#+BEGIN_SRC R
+  lab <- paste(paste(levels(yy$variedad),
+                     values(hg,levels(yy$variedad)),sep="-"),
+               collapse="\n")
+  gg <- ggplot(data=yy,aes(x=reorder(variedad,kgha,FUN="median"),
+                           y=kgha))
+  gg <- gg+geom_boxplot()+labs(x="variedad",y="kgha",
+                               title="dispersion x variedad")
+  lb <- paste(paste(levels(yy$ambiente),
+                    values(ha,levels(yy$ambiente)),sep="-"),
+              collapse="\n")
+  gp <- ggplot(data=yy,aes(x=reorder(ambiente,kgha,FUN="median"),
+                           y=kgha))
+  gp <- gp+geom_boxplot()+labs(x="ambiente",y="kgha",
+                               title="dispersion por localidad")
+#+END_SRC
+#+BEGIN_SRC R
+  ggsave("dis_var.png",gg+annotate("text",label=lab,
+                                   x=4,y=4500,size=2),
+         width=5,height=4.5)
+  ggsave("dis_loc.png",gp+annotate("text",label=lb,
+                                   x=4,y=4500,size=2),
+         width=5,height=4.5)
+#+END_SRC
+**** aov
+#+name: br-por-localidad
+#+BEGIN_SRC R
+  mc <- rbind("NB-6 vs otras"=c(1,rep(-1/7,7)))
+  #mc <- t(contr.poly(7))
+  #mc <- cbind(matrix(0,ncol=1,nrow=nrow(mc)),mc)
+  #mc <- rbind("NB-6 vs otras"=c(7,rep(-1,7)),mc)
+  av_loc <- lapply(split(yy,yy$localidad),function(x){
+      av <- aov(kgha~bloque+variedad,
+                contrast=list(variedad=make.contrasts(mc)),data=x)
+      amb <- x$localidad[1]
+      fc <- fit.contrast(av,"variedad",mc[1,],conf=0.95)
+      con <- as.data.frame(matrix(fc[,c(1,2,5,6)],nrow=1))
+      names(con) <- c("estimado","desv.est",
+                      "lim.inf.95","lim.sup.95")
+      rownames(con) <- paste(amb,"NB-6 vs otras",sep="::")
+      cme <- deviance(av)/df.residual(av)
+      med <- mean(x$kgha)
+      cv <- signif(sqrt(cme)/med,2)
+      mev <- tapply(x$kgha,x$variedad,mean)
+      res <- data.frame(kgha=c(round(c(mev,med,
+                                      sqrt(cme/nlevels(x$bloque)))),
+                                      cv))
+      rownames(res) <- c(values(hg,key=names(mev)),
+                         "media","des.est.media","coef.var")
+      names(res) <- amb
+      list(av=summary(av,split=list(variedad=list("NB-6 vs otras"=1,
+                                                  "entre otras"=2:7))),
+           cme=round(cme),
+           media=round(med),
+           res=res,
+           con=round(con),
+           loc=amb)
+  })
+#+END_SRC
+#+BEGIN_SRC R
+  zz <- Reduce(cbind,lapply(av_loc,"[[","res"))
+  xx <- Reduce(rbind,lapply(av_loc,"[[","con"))
+#+END_SRC
+#+BEGIN_SRC R
+  guardaxls(zz,"promedios",file_res,xlsx=T,nomfilas=T)
+  guardaxls(xx,"contrastes",file_res,xlsx=T,nomfilas=T)
+#+END_SRC
+#+name: br-combinado
+#+BEGIN_SRC R
+  mc <- rbind("NB-6 vs otras"=c(1,rep(-1/7,7)))
+  av <- aov(kgha~variedad*ambiente+Error(ambiente/bloque),data=yy,
+            contrasts=list(variedad=make.contrasts(mc)))
+  ww <- summary(av,split=list(variedad=list("NB-6 vs otras"=1,
+                                            "entre otras"=2:7)))
+#+END_SRC
+#+BEGIN_SRC R
+  hh <- function(zz,xx){
+      zz <- cbind(zz,"Mean Sq"=zz[["Sum Sq"]]/zz[["Df"]])
+      zz <- cbind(zz,"F value"=zz[["Mean Sq"]]/xx[["Mean Sq"]])
+      zz <- cbind(zz,"Pr(>F)"=pf(zz[["F value"]],
+                         zz[["Df"]],xx[["Df"]],
+                         lower.tail=F))
+      invisible(zz)
+  }
+  xx <- ww[["Error: ambiente"]][[1]]
+  zz <- ww[["Error: ambiente:bloque"]][[1]]
+  xx <- hh(xx[,c("Df","Sum Sq")],zz)
+  uu <- rbind(xx,zz)
+  rownames(uu) <- c("ambiente","ambiente:bloque")
+  av_com <- rbind(uu,ww[["Error: Within"]][[1]])
+#+END_SRC
+**** ammi
+#+call: ammi-funciones()
+#+BEGIN_SRC R
+  av <- aov(kgha~variedad*ambiente+Error(ambiente/bloque),
+            data=yy)
+  tt <- model.tables(av,type="effects",cterms="variedad:ambiente")
+  usv <- ge_svd(tt$tables[["variedad:ambiente"]],ncp=2)
+  nn <- c(repeticiones=nlevels(yy$bloque),
+          genotipos=nlevels(yy$variedad),
+          ambientes=nlevels(yy$ambiente))
+  ww <- summary(av)[["Error: Within"]][[1]]
+  rownames(ww) <- str_trim(rownames(ww))
+  ss <- c("Df","Sum Sq","Mean Sq")
+  cc <- c("gl","sc","cm")
+  ssi <- as.numeric(ww["variedad:ambiente",ss])
+  names(ssi) <- cc
+  ssr <- as.numeric(ww["Residuals",ss])
+  names(ssr) <- cc
+  sig <- ge_signal(sci=ssi,sce=ssr)
+  usv <- ge_svd(tt$tables[["variedad:ambiente"]],ncp=4)
+  gol <- ge_gollob(usv$vs,ssi,ssr,nn)
+  names(gol) <- names(ww)
+  cc <- rownames(ww)
+  rownames(gol) <- str_pad(paste0("  ",rownames(gol)),
+                           nchar(cc[1]),"right")
+  frt <- ge_FR(usv$vs,ssi,ssr,nn)
+  names(frt) <- names(ww)
+  rownames(frt) <- str_pad(paste0("  ",rownames(frt)),
+                           nchar(cc[1]),"right")
+  wgo <- rbind(ww[1:2,],gol,ww[3,])
+  wfr <- rbind(ww[1:2,],frt,ww[3,])
+#+END_SRC
+#+BEGIN_SRC R
+  ww <- as.data.frame(usv$u)
+  rownames(ww) <- values(hg,rownames(ww))
+  guardaxls(ww,"compgenotipos",file_res,xlsx=T,nomfilas=T)
+  ww <- as.data.frame(usv$v)
+  rownames(ww) <- values(ha,rownames(ww))
+  guardaxls(ww,"compambientes",file_res,xlsx=T,nomfilas=T)
+  guardaxls(as.data.frame(usv$vs),"valorsingular",file_res,
+            xlsx=T,nomfilas=F)
+#+END_SRC
+src_R{librerias("ggplot2 ggrepel")}
+#+BEGIN_SRC R
+  mg <- tapply(yy$kgha,yy$variedad,mean)
+  ma <- tapply(yy$kgha,yy$ambiente,mean)
+  pb <- ge_biplot_mean(mg,ma,usv$u,usv$v,values(hg,names(mg)),
+                       values(ha,names(ma)),labsize=3,pointsize=1)
+#+END_SRC
+#+BEGIN_SRC R
+  ggsave("ammi_1.png",pb+theme_gray(base_size=10),
+         width=5,height=4.8)
+#+END_SRC
+#+BEGIN_SRC R
+  uu <- values(hg,rownames(usv$u))
+  uu <- sub("HZ?N?H?GAB0","",uu)
+  uu <- sub("1","",uu)
+  sg <- gsub("[0LTW]","",uu)
+  uu <- tolower(values(ha,rownames(usv$v)))
+  sa <- substring(uu,1,3)
+  nn <- grep("_r",uu)
+  sa[nn] <- paste0(substring(sa[nn],1,2),"r")
+  pb <- ge_biplot(usv$u,usv$v,sg,sa,labsize=3,pointsize=1)
+#+END_SRC
+#+BEGIN_SRC R
+  ggsave("ammi_2.png",pb+theme_gray(base_size=10),
+         width=5,height=4.8)
+#+END_SRC
+*** Resultados
+:properties:
+:title: Resultados
+:export_file_name: c:/eddy/wk/ammi/brenes/ex.docx
+:end:
+**** Análisis exploratorio
+En algunos casos, a partir de los datos de peso de parcela, humedad y
+tamaño de la parcela (número de surcos y longitud y distancia entre
+surcos), mi cálculo de kg/ha no coincide con el registrado en las
+tablas resumen. Los análisis están hechos con los datos calculados por
+ustedes.
+
+En las gráficas se ve que algunos datos de los experimentos realizados
+en Posoltega pueden distorsionar los análisis: en la época de riego,
+el de la parcela 8 (3123 kg/ha) y en la época de postrera, los de las
+parcelas 6 y 10 (más de 5000 kg/ha). Habría que asegurarse que no es
+causa de algún error.
+
+También se ve que, en promedio, hay 3 grupos de ambientes: los más
+"productivos" (matagalpa, masatepe, rivas-riego y villa sandino) y los
+menos "productivos" (CNIA-riego, posoltega-riego, masatepe-riego y
+rivas). Esto ya de por sí es llamativo porque habría que tener una
+explicación al hecho de que la mayor parte de los experimentos con
+riego están en este grupo. Dada la gran variación en los promedios de
+ambiente, es casi seguro que la interacción también será muy
+importante
+
+En cuanto a las variedades, se ve que, en promedio, NB-6 es una de los
+más productivos.
+
+\includegraphics{disvar.png}
+
+\includegraphics{disloc.png}
+**** Análisis combinado
+Como era de esperar, las diferencia entre ambientes es significativa;
+en promedio, no hay diferencias entre variedades, pero el contraste de
+NB-6 vs el resto es significativa tanto en promedio sobre los
+ambientes, como en su interacción con los ambientes. Debido a esto
+último, la interpretación del contraste debe hacerse ambiente por
+ambiente, no en promedio. Casi el 30% de la SC de interacción general
+se debe a este contraste.
+
+La prueba entre las variedades distintas a NB-6 no es significativa,
+ni en promedio ni a nivel de cada ambiente. Pareciera pues, que la
+variación entre esos materiales no es tan grande como la del error
+experimental.
+
+#+BEGIN_SRC R :results output replace :eval no-export :exports results
+  print(ascii(av_com,frame="topbot",
+        caption="Análisis combinado",align=c("l",rep("r",5)),
+        digits=c(rep(0,3),2,2)),type="org")
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+ #+CAPTION: Análisis combinado
+|                                    | Df | Sum Sq   | Mean Sq | F value | Pr(>F) |
+|------------------------------------+----+----------+---------+---------+--------|
+| ambiente                           | 9  | 89325427 | 9925047 | 16.02   | 0.00   |
+| ambiente:bloque                    | 10 | 6195107  | 619511  |         |        |
+| variedad                           | 7  | 4067407  | 581058  | 1.83    | 0.10   |
+|   variedad: NB-6 vs otras          | 1  | 1446720  | 1446720 | 4.55    | 0.04   |
+|   variedad: entre otras            | 6  | 2620687  | 436781  | 1.37    | 0.24   |
+| variedad:ambiente                  | 63 | 24815883 | 393903  | 1.24    | 0.19   |
+|   variedad:ambiente: NB-6 vs otras | 9  | 7150727  | 794525  | 2.50    | 0.02   |
+|   variedad:ambiente: entre otras   | 54 | 17665156 | 327133  | 1.03    | 0.45   |
+| Residuals                          | 70 | 22271188 | 318160  |         |        |
+#+end_example
+
+**** Análisis por localidad
+En cuanto a las variedades, estos análisis no dicen mucho más que el
+análisis combinado. Pero en cuanto a la técnica experimental, los
+resultados donde la prueba de F para bloques es bastante inferior a 1
+(p.ej. masatepe, posoltega y otros) indican problemas en el modelo del
+diseño (de los códigos en el "fieldbook" pareciera que la distribución
+en el campo no fue de acuerdo a un BCA común y corriente), parcelas
+"problemas" que habría que identificar con análisis más detallados,
+pérdida no uniforme de plantas en las parcelas (ameritaría un análisis
+de covarianza?)
+
+#+BEGIN_SRC R :results output replace :eval no-export :exports results
+  cc <- names(av_loc)
+  uu <- lapply(cc,function(x){
+             print(
+                 ascii(av_loc[[x]]$av,digits=c(0,0,0,2,2),
+                       align=c("l",rep("r",5)),caption=x),type="org")})
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+ #+CAPTION: CNIA
+|                           | Df | Sum Sq  | Mean Sq | F value | Pr(>F) |
+|---------------------------+----+---------+---------+---------+--------|
+| bloque                    | 1  | 580136  | 580136  | 3.08    | 0.12   |
+| variedad                  | 7  | 1537697 | 219671  | 1.17    | 0.42   |
+|   variedad: NB-6 vs otras | 1  | 526112  | 526112  | 2.80    | 0.14   |
+|   variedad: entre otras   | 6  | 1011584 | 168597  | 0.90    | 0.55   |
+| Residuals                 | 7  | 1317065 | 188152  |         |        |
+#+CAPTION: CNIA_riego
+|                           | Df | Sum Sq  | Mean Sq | F value | Pr(>F) |
+|---------------------------+----+---------+---------+---------+--------|
+| bloque                    | 1  | 1674664 | 1674664 | 7.78    | 0.03   |
+| variedad                  | 7  | 1094908 | 156415  | 0.73    | 0.66   |
+|   variedad: NB-6 vs otras | 1  | 65869   | 65869   | 0.31    | 0.60   |
+|   variedad: entre otras   | 6  | 1029040 | 171507  | 0.80    | 0.60   |
+| Residuals                 | 7  | 1507694 | 215385  |         |        |
+#+CAPTION: masatepe
+|                           | Df | Sum Sq  | Mean Sq | F value | Pr(>F) |
+|---------------------------+----+---------+---------+---------+--------|
+| bloque                    | 1  | 2208021 | 2208021 | 3.85    | 0.09   |
+| variedad                  | 7  | 3807660 | 543951  | 0.95    | 0.53   |
+|   variedad: NB-6 vs otras | 1  | 1952275 | 1952275 | 3.41    | 0.11   |
+|   variedad: entre otras   | 6  | 1855385 | 309231  | 0.54    | 0.77   |
+| Residuals                 | 7  | 4011026 | 573004  |         |        |
+#+CAPTION: masatepe_riego
+|                           | Df | Sum Sq  | Mean Sq | F value | Pr(>F) |
+|---------------------------+----+---------+---------+---------+--------|
+| bloque                    | 1  | 36      | 36      | 0.00    | 0.99   |
+| variedad                  | 7  | 2875803 | 410829  | 2.08    | 0.18   |
+|   variedad: NB-6 vs otras | 1  | 469516  | 469516  | 2.38    | 0.17   |
+|   variedad: entre otras   | 6  | 2406287 | 401048  | 2.03    | 0.19   |
+| Residuals                 | 7  | 1382677 | 197525  |         |        |
+#+CAPTION: matagalpa
+|                           | Df | Sum Sq  | Mean Sq | F value | Pr(>F) |
+|---------------------------+----+---------+---------+---------+--------|
+| bloque                    | 1  | 1230194 | 1230194 | 3.37    | 0.11   |
+| variedad                  | 7  | 4904676 | 700668  | 1.92    | 0.21   |
+|   variedad: NB-6 vs otras | 1  | 3727890 | 3727890 | 10.20   | 0.02   |
+|   variedad: entre otras   | 6  | 1176786 | 196131  | 0.54    | 0.77   |
+| Residuals                 | 7  | 2558984 | 365569  |         |        |
+#+CAPTION: posoltega
+|                           | Df | Sum Sq  | Mean Sq | F value | Pr(>F) |
+|---------------------------+----+---------+---------+---------+--------|
+| bloque                    | 1  | 113020  | 113020  | 0.19    | 0.67   |
+| variedad                  | 7  | 3732881 | 533269  | 0.92    | 0.54   |
+|   variedad: NB-6 vs otras | 1  | 573190  | 573190  | 0.99    | 0.35   |
+|   variedad: entre otras   | 6  | 3159690 | 526615  | 0.91    | 0.54   |
+| Residuals                 | 7  | 4061994 | 580285  |         |        |
+#+CAPTION: posoltega_riego
+|                           | Df | Sum Sq  | Mean Sq | F value | Pr(>F) |
+|---------------------------+----+---------+---------+---------+--------|
+| bloque                    | 1  | 73499   | 73499   | 0.61    | 0.46   |
+| variedad                  | 7  | 1231071 | 175867  | 1.46    | 0.31   |
+|   variedad: NB-6 vs otras | 1  | 12890   | 12890   | 0.11    | 0.75   |
+|   variedad: entre otras   | 6  | 1218181 | 203030  | 1.69    | 0.25   |
+| Residuals                 | 7  | 842471  | 120353  |         |        |
+#+CAPTION: rivas
+|                           | Df | Sum Sq  | Mean Sq | F value | Pr(>F) |
+|---------------------------+----+---------+---------+---------+--------|
+| bloque                    | 1  | 7711    | 7711    | 0.06    | 0.82   |
+| variedad                  | 7  | 1515721 | 216532  | 1.60    | 0.27   |
+|   variedad: NB-6 vs otras | 1  | 656466  | 656466  | 4.87    | 0.06   |
+|   variedad: entre otras   | 6  | 859255  | 143209  | 1.06    | 0.46   |
+| Residuals                 | 7  | 944465  | 134924  |         |        |
+#+CAPTION: rivas_riego
+|                           | Df | Sum Sq  | Mean Sq | F value | Pr(>F) |
+|---------------------------+----+---------+---------+---------+--------|
+| bloque                    | 1  | 254582  | 254582  | 1.41    | 0.27   |
+| variedad                  | 7  | 2749712 | 392816  | 2.17    | 0.16   |
+|   variedad: NB-6 vs otras | 1  | 63587   | 63587   | 0.35    | 0.57   |
+|   variedad: entre otras   | 6  | 2686125 | 447688  | 2.47    | 0.13   |
+| Residuals                 | 7  | 1267960 | 181137  |         |        |
+#+CAPTION: Villa_Sandino
+|                           | Df | Sum Sq  | Mean Sq | F value | Pr(>F) |
+|---------------------------+----+---------+---------+---------+--------|
+| bloque                    | 1  | 53244   | 53244   | 0.09    | 0.78   |
+| variedad                  | 7  | 5433160 | 776166  | 1.24    | 0.39   |
+|   variedad: NB-6 vs otras | 1  | 549651  | 549651  | 0.88    | 0.38   |
+|   variedad: entre otras   | 6  | 4883509 | 813918  | 1.30    | 0.37   |
+| Residuals                 | 7  | 4376851 | 625264  |         |        |
+#+end_example
+
+**** AMMI
+El porcentaje de "señal" en el AMMI es sólo de 19%, lo cual es bajo y
+el análisis no es muy informativo. De hecho, las pruebas de Gollob y
+de Haberman indican que es suficiente un componente para describir la
+interacción (gráfica 1). Esto puede ser sólo una consecuencia de lo
+señalado en el análisis exploratorio.
+
+#+BEGIN_SRC R :results output replace :exports results :eval no-export
+  print(ascii(wgo,digits=c(0,0,0,2,3),
+              align=c("l",rep("r",5)),caption="Gollob"),type="org")
+  print(ascii(wfr,digits=c(0,0,0,2,3),
+              align=c("l",rep("r",5)),caption="Goodman-Haberman"),
+        type="org")
+  print(sig)
+  #print(ascii(sig,digits=c(0,0,2)),caption="Señal-ruido",type="org")
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+ #+CAPTION: Gollob
+|                   | Df | Sum Sq   | Mean Sq | F value | Pr(>F) |
+|-------------------+----+----------+---------+---------+--------|
+| variedad          | 7  | 4067407  | 581058  | 1.83    | 0.096  |
+| variedad:ambiente | 63 | 24815883 | 393903  | 1.24    | 0.192  |
+|   cp_1            | 15 | 10187350 | 679157  | 2.13    | 0.018  |
+|   cp_2            | 13 | 4766771  | 366675  | 1.15    | 0.332  |
+|   cp_3            | 11 | 3619645  | 329059  | 1.03    | 0.427  |
+|   cp_4            | 9  | 2838033  | 315337  | 0.99    | 0.455  |
+|   residuo_int     | 15 | 3404085  | 226939  | 0.71    | 0.763  |
+| Residuals         | 70 | 22271188 | 318160  |         |        |
+ #+CAPTION: Goodman-Haberman
+|                   | Df | Sum Sq   | Mean Sq | F value | Pr(>F) |
+|-------------------+----+----------+---------+---------+--------|
+| variedad          | 7  | 4067407  | 581058  | 1.83    | 0.096  |
+| variedad:ambiente | 63 | 24815883 | 393903  | 1.24    | 0.192  |
+|   cp_1            | 48 | 14628533 | 304761  | 0.96    | 0.558  |
+|   cp_2            | 35 | 9861763  | 281765  | 0.89    | 0.647  |
+|   cp_3            | 24 | 6242117  | 260088  | 0.82    | 0.703  |
+|   cp_4            | 15 | 3404085  | 226939  | 0.71    | 0.763  |
+| Residuals         | 70 | 22271188 | 318160  |         |        |
+
+  signal.sc    noise.cm      pct.cm
+ 4771813.27 20044069.49       19.23
+#+end_example
+
+\includegraphics{ammi_1.png}
+\includegraphics{ammi_2.png}
+* experimento-finca
+** Hilldebrand, Mercado
+#+BEGIN_SRC R
+  source("c:/eddy/code/r/huaca.r",
+         local=attach(NULL, name="huaca"))
+  setwd("c:/eddy/wp/gxe")
+#+END_SRC
+*** datos
+# Hildebrand
+#+BEGIN_SRC R
+  ## ww <- data.entry(list(village=0L, farmer=0L, treatment="", t_ha=0.0),
+  ##                  Modes=NULL)
+
+  ## manual
+  ww <- dataentry(list(t_ha=0.0), modes=list("numeric"))
+  ww <- as.data.frame(ww)
+  ww["village"] <- rep(c(1, 2), c(32, 24))
+  ww["farmer"] <- c(rep(1:8, each=4), rep(1:6, each=4))
+  ww["treatment"] <- rep(c("local_maize", "fertilizer_local",
+                           "CCA_maize", "fertilizer_CCA"), 14)
+  meta(ww) <- "maíz, on-farm trial; Hilldebrand, Agr.Jour. 76, 1984"
+  guardar(ww, "hild", "rd/interaccion.rda")
+#+END_SRC
+
+# Mercado, otros - diamond trial
+#+BEGIN_SRC R
+  ww <- dataentry(list(kg_ha=0.0), modes=list("numeric"))
+  ww <- as.data.frame(ww)
+  ww["location"] <- rep(c("Bo. Mabunga, Bukidnon",
+                          "Compostela, Davao Norte",
+                          "Bagumbayan, Sultan Kadur",
+                          "New Bataan, Davao",
+                          "Impasusong, Bukidnon",
+                          "Impasusong_2, Bukidnon",
+                          "Kisolon, Sumilao, Bukidnon",
+                          "Molave, Zamboanga Sur",
+                          "Hinatuan, Surigao Sur",
+                          "Dao, Capiz", "Davao City",
+                          "Ganassi, Lanao Sur",
+                          "San Miguel, Surigao Sur",
+                          "Sibonga, Cebu",
+                          "Naawan, Misamis Or."
+                          ), 4)
+  ww["treatment"] <- rep(c("farmer_variety+farmer_practice",
+                           "farmer_variety+recommended_practice",
+                           "recommended_variety+farmer_practice",
+                           "recommended_variety+recommended_practice"),
+                         each=15)
+  meta(ww) <- paste("maize farm diamond trial",
+                    "Mercado+otros Philipp. Jour. Crop Sci.", sep="\n")
+  guardar(ww, "mercado", "rd/interaccion.rda")
+#+END_SRC
+
+# Mercado-otros; package of technology (POT)
+#+BEGIN_SRC R
+  ww <- dataentry(list(kg_ha=0.0), modes=list("numeric"))
+  ww <- as.data.frame(ww)
+  ww["treatment"] <- rep(c("farmer_pract.", "minus_insect.",
+                           "minus_density", "minus_weed_ctrl.",
+                           "minus_fertil.", "minus_variety",
+                           "recommended_pract."), each=18)
+  ww["location"] <- rep(c("Silang, Cavite", "Sapian, Capiz",
+                          "Dauin, Negros Or.", "Siaton, Negros Or.",
+                          "Mabinay, Negros Or.", "Panglao, Bohol",
+                          "Alae, Cag. de Oro",
+                          "Aglayan, Malaybalay, Bukidnon",
+                          "Aglayan, Malaybalay", "Bansalan, Davao Sur",
+                          "Digos, Davao Sur", "Malagos, Davao City",
+                          "Banga, South Cotabato",
+                          "Tboli, South Cotabato",
+                          "Matalam, North Cotabato",
+                          "Kidapawan, North Cot.",
+                          "Makilala, North Cotabato",
+                          "Tacurong, S. Kudarat"), 7)
+  meta(ww) <- paste("maiz, farm, POT-minus 1 trial;",
+                    "Mercado+otros Philipp. Jour. Crop Sci.", sep="\n")
+  guardar(ww, "mercado2", "rd/interaccion.rda")
+#+END_SRC
+** frijol biofortificado
+# datos Caldrón; presentado PCCMCA-2016; estabilidad Hildebrand
+#+BEGIN_SRC R
+  source("c:/eddy/code/r/huaca.r",
+         local=attach(NULL, name="huaca"))
+  setwd("c:/eddy/wp/gxe")
+#+END_SRC
+  
+#+BEGIN_SRC R
+  library(tidyr)
+  library(officer)
+
+  ww <- read_docx("rd/fribioloc.docx")
+  uu <- docx_summary(ww)
+  ee <- uu[uu$doc_index==43,]
+  ii <- between(ee$row_id, 3, 68)
+  ww <- tibble(municipio=ee$text[ee$cell_id==2 & ii],
+               localidad=ee$text[ee$cell_id==3 & ii],
+               smr_88=type.convert(sub("[^0-9]","",
+                                       ee$text[ee$cell_id==5 & ii])),
+               smr_100=type.convert(sub("[^0-9]","",
+                                        ee$text[ee$cell_id==6 & ii])),
+               ferroso=type.convert(sub("[^0-9]","",
+                                        ee$text[ee$cell_id==7 & ii])))
+  cc <- ww$municipio
+  nn <- grep("[Jj][íi]ca", cc)
+  cc[nn] <- "El Jícaro"
+  nn <- grep("[Dd]ar", cc)
+  cc[nn] <- "Ciudad Darío"
+  nn <- grep("[Yy]al", cc)
+  cc[nn] <- "San Sebastián de Yalí"
+  nn <- grep("[Pp]anta", cc)
+  cc[nn] <- "Santa María de Pantasma"
+  nn <- regexpr("^[Ss]n\\b", ww$municipio, perl=TRUE)
+  regmatches(cc, nn) <- "San"
+
+  ww["municipio"] <- cc
+  ww["departamento"] <- dpto_muni(cc)
+
+  ww <- gather(ww, key="cultivar", value="kg_ha", smr_88, smr_100,
+               ferroso)
+  meta(ww) <- "frijol biofortificado 66 localidades-Caldrón, 2016"
+  guardar(ww, "fribioloc", "rd/interaccion.rda")
+#+END_SRC
+
+# exploración
+#+BEGIN_SRC R
+  xx <- get_dff("fribioloc", "rd/interaccion.rda")
+  oo <- par()
+  bb <- boxplot(log(kg_ha)~departamento, horizontal=TRUE,
+                las=1, data=xx)
+#+END_SRC
+
+#+BEGIN_SRC R
+  library(lattice)
+  bwplot(cultivar~kg_ha|departamento, data=xx, horizontal=TRUE)
+  bwplot(kg_ha~cultivar|departamento, data=xx, horizontal=FALSE)
+
+  dev.off()
+#+END_SRC
+
+#+BEGIN_SRC R
+  library(ggplot2)
+  gg <- ggplot(data=xx, aes(x=reorder(cultivar, kg_ha, FUN="median"),
+                            y=kg_ha))
+  gg+geom_boxplot()+labs(x="cultivar", y="kg_ha",
+                         title="dispersion x cultivar")
+
+  gg <- ggplot(data=xx, aes(x=reorder(departamento, kg_ha, FUN="median"),
+                            y=kg_ha))
+  gg+geom_boxplot()+labs(x="departamento", y="kg_ha",
+                         title="dispersion por departamento")
+#+END_SRC
+** plátano
+# datos Víctor Aguilar; no replicado
+#+BEGIN_SRC R
+  source("c:/eddy/code/r/huaca.r",
+         local=attach(NULL, name="huaca"))
+  setwd("c:/eddy/wp/experimentos/platano")
+#+END_SRC
+#+BEGIN_SRC R
+  f2015 <- tablaxls("rd/cos2015.xlsx", "flor2015", xlsx=TRUE)
+  meta(f2015) <- "floración-plátano 2015; selección-hijos; Víctor Aguilar"
+  c2015 <- tablaxls("rd/cos2015.xlsx", "cosecha2015", xlsx=TRUE)
+  meta(c2015) <- "cosecha-plátano 2015; selección-hijos; Víctor Aguilar"
+
+  f2016 <- tablaxls("rd/cos2016.xlsx", "flor2016", xlsx=TRUE)
+  meta(f2016) <- "floración-plátano 2016; selección-hijos; Víctor Aguilar"
+  c2016 <- tablaxls("rd/cos2016.xlsx", "cosecha2016", xlsx=TRUE)
+  meta(c2016) <- "cosecha-plátano 2016; selección-hijos; Víctor Aguilar"
+
+  f2017 <- tablaxls("rd/cos2017.xlsx", "flor2017", xlsx=TRUE)
+  meta(f2017) <- "floración-plátano 2017; selección-hijos; Víctor Aguilar"
+  c2017 <- tablaxls("rd/cos2017.xlsx", "cosecha2017", xlsx=TRUE)
+  meta(c2017) <- "cosecha-plátano 2017; selección-hijos; Víctor Aguilar"
+
+  guardar_v(c("f2015", "c2015", "f2016", "c2016", "f2017", "c2017"),
+            "rd/platanova.rda")
+#+END_SRC
