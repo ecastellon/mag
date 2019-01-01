@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 ## --- funciones para consultar base de datos ---
 #' @export
 set_odb <- function(ob, ...) UseMethod("set_odb")
@@ -605,6 +606,27 @@ save_xcl <- function(df, tabla, file, xv7 = TRUE){
     } else {
         message("error conexión\n")
     }
+}
+
+#'read-excel
+#' @description leer tabla o rango con nombre de excel por medio de
+#'     RODBC
+#' @param x nombre del rango
+#' @param file nombre del archivo
+#' @param xv7 versión 7 de excel? TRUE por defecto
+#' @return data.frame o NULL si error durante la lectura
+#' @export
+#' @author eddy castellón
+read_xcl <- function(x, file, xv7 = TRUE){
+    oo <- db_xcl(file, version7 = xv7, ronly = FALSE)
+    kk <- db_open(oo)
+    if (is_rodbc(kk)){
+        uu <- db_fetch(kk, x)
+        odbcClose(kk)
+    } else {
+        uu <- NULL
+    }
+    invisible(uu)
 }
 
 ## --- códigos y consultas base datos encuestas ---

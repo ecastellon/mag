@@ -270,6 +270,8 @@ w_nr <- function(clase, ccc, crs, cnc, cne, dec = 5){
     nc <- tapply(wb * ii, clase, sum) ## total elegibles conocidos
     ii <- ii & si_responde(ccc, crs)
     nr <- tapply(wb * ii, clase, sum) ## elegibles responden
+    ## ÔjÔ nr == 0 si todos en el grupo no responden => fc es NA
+    ## o poner a 0 (?)
     fc <- round(nc / nr, dec)
     mm <- match(as.character(clase), names(nc))
     fc <- fc[mm]

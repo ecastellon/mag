@@ -195,6 +195,27 @@ save_add <- function(..., list = character(), file, env){
     invisible(cc)
 }
 
+#' Agrega objetos a un archivo. Alias de save_add.
+#' @description Agrega uno o más objetos (data.frame y otros)
+#'     indicados por su nombre (sin comillas) o en un vector (entre
+#'     comillas) definidos en un "environment", a un archivo,
+#'     conservando los que ya se encontraban en él.
+#' @param list vector con los nombres (entre comillas) de los objetos
+#' @param file ruta/nombre del archivo
+#' @param envir el "environment" donde están definidos los objetos;
+#'     por omisión, el "environment" desde donde se llama la función
+#'     (parent.frame)
+#' @return listado (invisible) de objetos agregados
+#' @export
+#' @examples
+#' save_add(aa, bb, file="xx.rda")
+#' save_add(list=c("aa", "bb"), file="xx.rda")
+#' save_add(aa, bb, list=c("dd", "ee"), file="xx.rda")
+#' @importFrom assertthat assert_that
+add_tof <- function(..., list = character(), file, env){
+    save_add(..., list, file, env)
+}
+
 #' Leer data.frame y asignarlo a un "environment"
 #' @description Lee uno o más data.frame almacenados en un archivo y
 #'     los asigna a un "environment" con el mismo nombre que tienen en
@@ -204,7 +225,7 @@ save_add <- function(..., list = character(), file, env){
 #'     data.frame que serán transferidos del archivo al "environment"
 #' @param file ruta/nombre del archivo
 #' @param envi "environment" de destino; por omisión el desde donde
-#'     se llama la funciÃ³n (parent.frame)
+#'     se llama la función (parent.frame)
 #' @return listado (invisible) de los data.frame que fueron
 #'     encontrados y devueltos
 #' @examples
@@ -774,6 +795,16 @@ p_type <- function(x, y){
     typeof(x) == typeof(y)
 }
 
+#' Alias p_type mismo tipo
+#' @description vectores del mismo tipo?
+#' @param x vector
+#' @param y vector
+#' @return TRUE si x e y son del mismo tipo
+#' @author eddy castellón
+eq_type <- function(x, y){
+    typeof(x) == typeof(y)
+}
+
 #' mismo modo
 #' @description vectores del mismo modo?
 #' @param x vector
@@ -781,6 +812,16 @@ p_type <- function(x, y){
 #' @return TRUE si x e y son del mismo modo
 #' @author eddy castellón
 p_mode <- function(x, y){
+    mode(x) == mode(y)
+}
+
+#' Alias p_mode mismo modo
+#' @description vectores del mismo modo?
+#' @param x vector
+#' @param y vector
+#' @return TRUE si x e y son del mismo modo
+#' @author eddy castellón
+eq_mode <- function(x, y){
     mode(x) == mode(y)
 }
 
@@ -842,8 +883,8 @@ nest_str <- function(x, cc = c("(", ")")){
 #' @export
 #' @importFrom assertthat assert_that
 a_propio <- function(x = character()){
-    assert_that(ok_char(x),
-                msg="x no es tipo character")
+    assert_that(ok_chr(x),
+                msg = "x no es tipo character")
     gsub("\\b([a-z])","\\U\\1", tolower(x), perl = TRUE)
 }
 
@@ -864,6 +905,17 @@ str_podada <- function(x = character()){
     regmatches(x, regexpr("\\b.*\\b", x, perl = TRUE))
 }
 
+#' Poda espacios
+#' @description quita los espacios antes y después de una frase
+#' @param x frase
+#' @export
+#' @importFrom assertthat assert_that
+podar_str <- function(x = character()){
+    assert_that(ok_chr(x),
+                msg="x no es tipo character")
+    regmatches(x, regexpr("\\b.*\\b", x, perl = TRUE))
+}
+
 ## sustituye dos o más caracteres tipo espacio (\n, \t, \s)
 ## por un espacio y poda extremos
 ## Character -> Character
@@ -877,6 +929,17 @@ str_bien_formada <- function(x = character()){
     assert_that(ok_chr(x),
                 msg="x no es tipo character")
     str_podada(gsub("[[:space:]]+", " ", x))
+}
+
+#' Espacios de más
+#' @description elimina dos o más espacios consecutivos
+#' @param x frase
+#' @export
+#' @importFrom assertthat assert_that
+sin_espacio_extra <- function(x = character()){
+    assert_that(ok_chr(x),
+                msg="x no es tipo character")
+    podar_str(gsub("[[:space:]]+", " ", x))
 }
 
 ## no requiere stringr
@@ -901,6 +964,7 @@ str_sin_tilde <- function(x = character()){
 #' Caracter
 #' @description es vector de caracteres con elementos
 #' @param x vector
+#' @export
 ok_chr <- function(x){
     is.character(x) && length(x)
 }
@@ -908,6 +972,7 @@ ok_chr <- function(x){
 #' Número
 #' @description es vector modo numérico y con elementos
 #' @param x vector
+#' @export
 ok_num <- function(x){
     is.numeric(x) && length(x)
 }
@@ -915,6 +980,7 @@ ok_num <- function(x){
 #' Entero
 #' @description es vector tipo entero
 #' @param x vector
+#' @export
 ok_int <- function(x){
     is.integer(x) && length(x)
 }
@@ -922,6 +988,7 @@ ok_int <- function(x){
 #' Enteros-letra
 #' @description es vector cuyos elementos son dígitos-alfanuméricos
 #' @param x vector
+#' @export
 ok_int_chr <- function(x){
     ok_chr(x) && !any(grepl("[^0-9]", x))
 }
@@ -931,6 +998,7 @@ ok_int_chr <- function(x){
 #'     caracter es letra
 #' @param x nombre
 #' @return TRUE si caracteres alfanuméricos empezados por letra
+#' @export
 ok_nombre <- function(x){
     ok_chr(x) && all(grepl("^[[:alpha:]]\\w*", x))
 }
@@ -941,7 +1009,9 @@ ok_nombre <- function(x){
 #' @param x vector tipo entero o doble
 #' @export
 na0 <- function(x){
-    if (is.numeric(x)) x[is.na(x)] <- 0
+    if (is.numeric(x)) {
+        x[is.na(x)] <- ifelse(typeof(x) == "integer", 0L, 0.0)
+    }
     invisible(x)
 }
 
@@ -984,19 +1054,28 @@ vector_NA <- function(n = 1, tipo = "integer", toNA = TRUE){
 #'     los de 'remplazo'. El número de elementos en 'x' debe ser igual
 #'     al de 'busca', y el de 'buscaen' al de 'remplazo'; también
 #'     deben ser del mismo modo 'x' y 'remplazo', y 'busca' y
-#'     'buscaen'
+#'     'buscaen'. x = NULL o missing crea vector inicializado a NA o 0
+#'     según parámetro opcional toNA.
 #' @param x vector
 #' @param busca vector con los elementos a buscar
 #' @param buscaen vector donde se buscan los elementos
 #' @param remplazo vector con los elementos que remplazarán los
 #'     correspondientes en 'x'
 #' @param msg TRUE por omisión; FALSE suprime mensajes de advertencia
+#' @param ... para indicar cómo iniciar x cuando x = NULL: toNA =
+#'     FALSE inicia a 0
 #' @export
 #' @author eddy castellón
-remplazar <- function(x, busca, buscaen, remplazo, msg = TRUE){
-    if (missing(buscaen) | missing(remplazo)){
-        warning("no hay remplazos ...\n")
+remplazar <- function(x = NULL, busca, buscaen, remplazo,
+                      msg = TRUE, ...){
+    if (missing(buscaen) || missing(remplazo) || missing(busca)){
+        warning("no hubo remplazo ...\n")
     } else {
+        ## inicializar con mismo tipo si falta
+        if (is.null(x) || missing(x)) {
+            x <- vector_NA(n = length(busca), tipo = typeof(remplazo),
+                           ...)
+        }
         assert_that(p_mode(x, remplazo),
                     p_mode(busca, buscaen),
                     length(x) == length(busca),
@@ -1005,7 +1084,7 @@ remplazar <- function(x, busca, buscaen, remplazo, msg = TRUE){
         mm <- match(busca, buscaen)
         ii <- is.na(mm)
         if (any(ii) && msg){
-            warning("\n... ", sum(ii), " no enlazan...")
+            warning("\n... ", sum(ii), " no calzan...")
         }
         ii <- !ii
         if (any(ii)){
@@ -1019,8 +1098,8 @@ remplazar <- function(x, busca, buscaen, remplazo, msg = TRUE){
 }
 
 #' porcentaje
-#' @description sirve para calcular el porcentaje con el que un dato
-#'     contribuye al valor que se da como base
+#' @description calcula el porcentaje con el que un dato contribuye al
+#'     valor que se da como base
 #' @param x datos
 #' @param base la base del porcentaje; por omisión el total de los
 #'     datos
@@ -1029,10 +1108,39 @@ remplazar <- function(x, busca, buscaen, remplazo, msg = TRUE){
 #' @export
 #' @importFrom assertthat assert_that
 #' @author eddy castellón
-pct <- function(x, base = sum(x, na.rm = TRUE), dec = 0){
-    assert_that(length(base) == 1 && base != 0,
-                msg = "base es igual a cero o vector incompatible\n")
-    round(100 * x / base, dec)
+pct <- function(x, base, dec = 0){
+    if (missing(base)){
+        base <- sum(x, na.rm = TRUE)
+    } else {
+        assert_that(length(base) == 1,
+                    msg = "base debe ser única")
+    }
+
+    if (base == 0 | is.na(base)){
+        pp <- NA_real_
+        warning("base es igual a cero")
+    } else {
+        pp <- round(100 * x / base, dec)
+    }
+    pp
+}
+
+#' fracción
+#' @description calcula el cociente y redondea
+#' @param x numerador
+#' @param y denominador
+#' @param dec decimales en el resultado
+#' @return cociente o NA si y = 0
+#' @export
+#' @author eddy castellón
+frac <- function(x, y, dec = 2){
+    assert_that(is.numeric(x), is.numeric(y),
+                msg = "no son números")
+    if (length(x) != length(y)) warning("\n!!! x, y diferente longitud")
+    r <- vector_NA(length(x), "double")
+    ii <- y != 0
+    r[ii] <- round((x / y)[ii], dec)
+    r
 }
 
 #' factor a caracter
@@ -1073,12 +1181,12 @@ fac2int <- function(x){
 #' @param msg con mensaje? TRUE por defecto
 #' @export
 #' @author eddy castellón
-atar <- function(x, y, msg = TRUE){
+parear <- function(x, y, msg = TRUE){
     assertthat::assert_that(mode(x) == mode(y),
                             msg = "modos diferentes")
     mm <- match(x, y, nomatch = NA, incomparables = NULL)
     if(msg && any(is.na(mm))){
-        warning("sin pareja: ", sum(!is.na(mm)), " de ", length(x))
+        warning("sin pareja: ", sum(is.na(mm)), " de ", length(x))
     }
     mm
 }
@@ -1094,11 +1202,22 @@ atar <- function(x, y, msg = TRUE){
 #' @importFrom assertthat assert_that
 #' @author eddy castellón
 match_2 <- function(x1, x2, y1, y2){
-    assert_that((length(x1) == length(x2)) &&
+    assert_that((length(x1) == length(x2)),
                 (length(y1) == length(y2)),
                 msg = "vectores de tamaño distinto !!!\n")
     invisible(match(interaction(x1, x2, drop = TRUE),
                     interaction(y1, y2, drop = TRUE)))
+}
+
+#' Alias de operador in
+#' @description remplazo de operador in
+#' @param x vector busca
+#' @param table vector donde buscar elementos de x
+#' @return TRUE para cada elemento de x encontrado en table
+#' @export
+#' @author eddy castellón
+en <- function(x, table){
+    match(x, table, nomatch = 0) > 0
 }
 
 ## DataFrame|List -> Integer

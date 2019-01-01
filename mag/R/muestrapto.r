@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 ##--- selección muestra de puntos ---
 ## v.0.0 20180508
 
@@ -89,7 +90,7 @@ shp_save <- function(spd, capa = character(), dsn = getwd()){
 ## Character -> DataFrame
 #' Shape data
 #' @description lee los datos asociados a la cobertura shape
-#' @param shp nombre del arhcivo shape
+#' @param shp nombre del archivo shape
 #' @param dsn ruta de acceso
 #' @return data.frame
 #' @export
@@ -105,6 +106,29 @@ shp_data <- function(shp = character(), dsn = character()){
     assert_that(file.exists(sh),
                 msg = "archivo de características no existe")
     invisible(read.dbf(sh, as.is = TRUE))
+}
+
+## data.frame -> Boolean guarda data de shape #' shape_data_save
+#' shp_data_save
+#' @description guarda data frame como tabla de atributos de un shape
+#'     que ya existe
+#' @param x el data.frame
+#' @param shp nombre del shape
+#' @param dsn ruta de acceso
+#' @return NULL
+#' @export
+#' @import foreign
+shp_data_save <- function(x, shp, dsn){
+    assert_that(is.data.frame(x), ok_nombre(shp), ok_nombre(dsn),
+                msg = "revisar parámetros")
+
+    if(!grepl("\\.dbf$", shp)){
+        shp <- paste0(shp, ".dbf")
+    }
+    sh <- file.path(dsn, shp)
+    assert_that(file.exists(sh),
+                msg = "shape no existe")
+    invisible(write.dbf(x, sh))
 }
 
 ## Character -> Character
