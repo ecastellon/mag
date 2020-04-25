@@ -150,6 +150,20 @@ shp_atributos <- function(shp, dsn){
     x
 }
 
+#' ID
+#' @description ID's de los polígonos
+#' @param x cobertura, SpatialPolygonsDataFrame
+#' @return vector con los ID's o NULL si error
+#' @export
+#' @import sp
+sp_poly_ids <- function(x){
+    if (inherits(x, "SpatialPolygonsDataFrame")) {
+        sapply(x@polygons, function(x) x@ID)
+    } else {
+        NULL
+    }
+}
+
 ## cols: columnas en cob que pasan en cobertura de salida
 ## fmtp: formato para el número de punto
 #' Sampling points
@@ -186,6 +200,116 @@ sample_points <- function(cob, cols = c("codigo", "estrato"),
     pd@data <- dp
     pd@proj4string <- CRS(proj4string(cob))
     invisible(pd)
+}
+
+#' Puntos polígonos
+#' @description selección aleatoria de puntos en polígonos
+#' @param cob cobertura: objeto SpatialPolygonsDataFrame. El número de
+#'     puntos a seleccionar en cada polígono, en la columna "puntos"
+#'     del data.frame
+#' @param cols columnas ('atributos') en el data.frame asociado a la
+#'     cobertura, que pasan a la cobertura de puntos
+#' @param labp nombre de los puntos; si no se proporciona se generan
+#'     con los parámetros pref, vorden y nchid
+#' @param pref prefijo del nombre de los puntos
+#' @param vorden columnas en el d.f de la cobertura "cob" que se
+#'     utilizarán para asignar el orden en el espacio de los
+#'     polígonos, de los nombres (labels) de los puntos
+#' @param nchid número de caracteres en el nombre de punto; 5 por
+#'     omisión
+#' @return objeto SpatialPointsDataFrame (invisible) con las
+#'     coordenadas de los puntos seleccionados, el ID de los polígonos
+#'     de la cobertura (columna "idpol") en el que están los puntos,
+#'     el nombre de los puntos en la columna "idpto", los atributos
+#'     transferidos de la cobertura de polígonos a la de puntos
+#'     (cols), y la correspondiente proj4string
+#' @export
+#' @import sp
+#' @importFrom maptools dotsInPolys
+#' @importFrom assertthat assert_that
+muestra_puntos <- function(cob, cols = character(),
+                           labp = character(),
+                           pref = character(),
+                           vorden = character(),
+                           nchid = 5L){
+    assert_that(inherits(cob, "SpatialPolygonsDataFrame"),
+                is.character(cols), is.character(labp),
+                msg = paste("SpatialPolygonsDataFrame", "character",
+                            "character", sep = ", "))
+
+    cc <- names(cob@data)
+    assert_that(is.element("puntos", cc),
+                msg = "falta columna de número de puntos")
+    
+    pd <- maptools::dotsInPolys(cob, cob@data$puntos)
+    ## df de pd sólo columna ID de los polígonos
+    ## devuelta como factor
+    id <- fac2char(pd@data$ID)
+
+    mm <- match(id, sp_poly_ids(cob))
+
+    ## id puntos
+    if (!length(labp)) {
+        ## dpto
+        if (!length(pref)) {
+            if (is.element("dpto", cc)) {
+                pref <- cob@data$dpto[1]
+            } else {
+                pref  <- "00"
+            }
+        }
+        labp <- n_ids(pref, length(id), nchid)
+        ## orden de id puntos
+        if (length(vorden)) {
+            oo <- order_df(cob@data[mm, vorden, drop = FALSE],
+                           vorden)
+            labp[oo] <- labp
+        }
+    }
+
+    ## cols cob -> ptos
+    ss <- intersect(cols, cc)
+    if (length(ss)) {
+        ww <- data.frame(idpol = id,
+                         cpunto = labp,
+                         cob@data[mm, ss],
+                         stringsAsFactors = FALSE)
+    } else {
+        ww <- data.frame(idpol = id,
+                         cpunto = labp,
+                         stringsAsFactors = FALSE)
+        warning("... no hay columnas", call. = FALSE)
+    }
+
+    pd@data <- ww
+    pd@proj4string <- sp::CRS(sp::proj4string(cob))
+    invisible(pd)
+}
+
+#' Id's
+#' @description construye "n" palabras a partir de un prefijo seguido
+#'     de un número suficiente de dígitos que garantizan que cada
+#'     palabra es única
+#' @param pref prefijo
+#' @param n número de palabras
+#' @param mxnc número máximo de caracteres de la palabra
+#' @return vector con "n" palabras distintas
+#' @export
+n_ids <- function(pref, n, mxnc = 5L){
+    ss <- as.character(pref)
+    n1 <- nchar(ss)
+    n2 <- nchar(as.character(n))
+
+    if (mxnc < n1 + n2) {
+        warning("... ajustado el número de caracteres",
+                call. = FALSE)
+    } else {
+        if (mxnc > n1 + n2) {
+            n2 <- mxnc - n1
+        }
+    }
+    fmt <- paste0("%s", "%0", n2, "i")
+    sprintf(fmt, ss, seq_len(n))
 }
 
 #' Replicated points
