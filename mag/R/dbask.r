@@ -425,6 +425,17 @@ db_open.odb <- function(ob){
         warning = function(e) message("\n...ADVERTENCIA de conexión")))
 }
 
+#' cierra database
+#' @description cierra canal de acceso a la base de datos
+#' @param ob objeto RODBC
+#' @return nada
+#' @import RODBC
+db_close.RODBC <- function(ob){
+    ww <- tryCatch(odbcClose(ob),
+                   error = function(e) e)
+    invisible(NULL)
+}
+
 #' Validar RODBC
 #' @description es objeto RODBC?. Para validar si la conexión mediante
 #'     RODBC es válida

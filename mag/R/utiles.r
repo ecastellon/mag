@@ -225,7 +225,7 @@ add_tof <- function(..., list = character(), file, env){
 #'     data.frame que serán transferidos del archivo al "environment"
 #' @param file ruta/nombre del archivo
 #' @param envi "environment" de destino; por omisión el desde donde
-#'     se llama la función (parent.frame)
+#'     se llama la funciÃ³n (parent.frame)
 #' @return listado (invisible) de los data.frame que fueron
 #'     encontrados y devueltos
 #' @examples

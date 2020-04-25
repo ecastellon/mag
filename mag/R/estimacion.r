@@ -349,7 +349,7 @@ estima_gr <- function(x, grupo, factor, wfx, nom, total = FALSE){
 #' @param dec número de decimales en el porcentaje
 #' @export
 #' @author eddy castellón
-pct_estima <- function(x, factor, wfx, dec = 0){
+pct_estima <- function(x, factor, wfx, dec = 0L){
     assert_that(length(x) == length(factor),
                 msg = "variable y factor incompatibles\n")
     
@@ -361,6 +361,34 @@ pct_estima <- function(x, factor, wfx, dec = 0){
     }
     
     invisible(pct(x * factor * wfx, dec = dec))
+}
+
+#' estimado - grupo - contribución
+#' @description encuentra el porcentaje con el que contribuye cada
+#'     dato a la estimación del total de un grupo
+#' @param x variable de interés
+#' @param gr indicador del grupo al que pertenecen los datos
+#' @param fx factor de expansión
+#' @param wf ponderación adicional al factor de expansión
+#' @param dec número de decimales en el porcentaje
+#' @export
+#' @author eddy castellón
+pct_estima_gr <- function(x, gr = character(), fx, wf = 1L, dec = 0L){
+
+    if (missing(gr) || !length(gr)){
+        gr <- integer(length(x))
+    } else {
+        if (!is.factor(gr)){
+            gr <- factor(gr)
+        }
+    }
+
+    assert_that(length(x) == length(fx),
+                length(x) == length(gr),
+                msg = "\n... param inconsistentes")
+
+    rr <- map2(split(x, gr), split(fx * wf, gr), pct_estima, dec = dec)
+    invisible(unsplit(rr, gr))
 }
 
 ## --- utiles durante estimación ---
