@@ -334,7 +334,8 @@ replica <- function(x, nrep = 5,
     }
     id <- seq_len(nrow(x))
     nn <- order_df(x[orden])
-    xx <- cbind(x[nn, orden, drop = FALSE], id = id[nn])
+    ##!!! chk colrep no tenga nombre id
+    xx <- cbind(x[nn, colrep, drop = FALSE], id = id[nn])
 
     zz <- Reduce(rbind,
                  lapply(split(xx, xx[,colrep]),
